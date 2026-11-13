@@ -65,9 +65,11 @@ jobs:
         run: |
           set -u
           day="$(date -u +%Y-%m-%d)"
-          printf '%s | %s | %s UTC\n' "$day" "$STATE" "$(date -u +%H:%M:%S)" > last-check.txt
+          printf '%s | %s\n' "$day" "$STATE" > last-check.txt
           git config user.name 'tvbox-sync[bot]'
           git config user.email 'tvbox-sync@users.noreply.github.com'
+          # 幂等清理：确保 workflows 目录下不残留误建的嵌套目录
+          git rm -r -q --ignore-unmatch .github/workflows/.github || true
           git add tvbox.json last-check.txt
           if git diff --cached --quiet; then
             echo "内容与状态均无变化，跳过提交"
