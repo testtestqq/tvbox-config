@@ -1,0 +1,79 @@
+name: Sync TVBox config
+
+on:
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+  push:
+    paths:
+      - 'SOURCE_URL'
+      - '.github/workflows/sync.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-tvbox
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Pick the first working source
+        id: pick
+        env:
+          DEFAULT_URL: 'https://d.kstore.dev/download/9280/wex.json'
+        run: |
+          set -u
+          cp tvbox.json /tmp/prev.json 2>/dev/null || true
+          mapfile -t URLS < <(sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' SOURCE_URL 2>/dev/null | grep -v '^$' || true)
+          if [ ${#URLS[@]} -eq 0 ]; then URLS=("$DEFAULT_URL"); fi
+          WINNER=""
+          for u in "${URLS[@]}"; do
+            echo "::group::try $u"
+            rm -f /tmp/candidate.json
+            if curl -fsSL --retry 2 --retry-delay 5 --connect-timeout 15 --max-time 60 \
+                 -A 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125.0 Safari/537.36' \
+                 "$u" -o /tmp/candidate.json && \
+               python3 -c 'import json; d=json.load(open("/tmp/candidate.json", encoding="utf-8-sig")); assert isinstance(d, dict) and any(k in d for k in ("sites", "lives", "spider")), "not a tvbox config"'; then
+              WINNER="$u"
+              cp /tmp/candidate.json tvbox.json
+              echo "选中: $u （$(wc -c < /tmp/candidate.json) 字节）"
+              echo "::endgroup::"
+              break
+            fi
+            echo "不可用: $u"
+            echo "::endgroup::"
+          done
+          if [ -z "$WINNER" ]; then
+            echo "::warning::所有源都不可用，保留上一版 tvbox.json"
+            echo "state=FAILED" >> "$GITHUB_OUTPUT"
+            if [ -f /tmp/prev.json ]; then cp /tmp/prev.json tvbox.json; fi
+          else
+            echo "state=OK" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit if changed
+        env:
+          STATE: ${{ steps.pick.outputs.state }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -u
+          day="$(date -u +%Y-%m-%d)"
+          printf '%s | %s | %s UTC\n' "$day" "$STATE" "$(date -u +%H:%M:%S)" > last-check.txt
+          git config user.name 'tvbox-sync[bot]'
+          git config user.email 'tvbox-sync@users.noreply.github.com'
+          git add tvbox.json last-check.txt
+          if git diff --cached --quiet; then
+            echo "内容与状态均无变化，跳过提交"
+          else
+            git commit -m "sync: $day ($STATE)"
+            git push
+            echo "已推送 tvbox.json / last-check.txt"
+          fi
+          curl -fsS --max-time 20 "https://purge.jsdelivr.net/gh/${REPO}@main/tvbox.json" || true
