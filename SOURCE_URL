@@ -2,7 +2,7 @@
 # 以 # 开头的是注释，空行忽略。
 # 源挂了只改这个文件（GitHub 网页上点笔图标即可），电视里的地址永远不用动。
 # 改完保存会自动触发同步；也可以在 Actions 里手动点 Run workflow。
-
+http://fty.xxooo.cf/tv
 https://d.kstore.dev/download/9280/wex.json
 https://raw.liucn.cc/box/m.json
 
